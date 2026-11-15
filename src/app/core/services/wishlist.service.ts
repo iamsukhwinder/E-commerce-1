@@ -1,4 +1,5 @@
-import { Injectable, signal, computed } from '@angular/core';
+import { Injectable, signal, computed, inject } from '@angular/core';
+import { ApiClient } from '../api/api-client.service';
 
 export interface WishlistItem {
   id: string;
@@ -27,10 +28,10 @@ export interface WishlistToast {
   providedIn: 'root',
 })
 export class WishlistService {
-  private readonly STORAGE_KEY = 'yourstore_shopping_wishlist';
+  private readonly api = inject(ApiClient);
 
   // State signals
-  private readonly _items = signal<WishlistItem[]>(this.loadFromStorage());
+  private readonly _items = signal<WishlistItem[]>([]);
   private readonly _toast = signal<WishlistToast | null>(null);
   private toastTimeoutId: any = null;
 
@@ -44,6 +45,9 @@ export class WishlistService {
 
   // Set of wishlisted item IDs for fast O(1) reactive checks
   readonly itemIdsSet = computed(() => new Set(this._items().map((item) => item.id)));
+
+  constructor() { this.refresh(); }
+  refresh(): void { if (typeof window === 'undefined' || !localStorage.getItem('yourstore_auth_token')) return; this.api.get<any[]>('/wishlist').subscribe({ next: rows => this._items.set(rows.map(x => ({ id: String(x.productId), name: x.product.name, brand: x.product.brand, image: x.product.imageUrl, price: x.product.price, originalPrice: x.product.originalPrice, inStock: x.product.inStock, addedAt: new Date(x.createdAt).getTime() }))), error: () => this._items.set([]) }); }
 
   /**
    * Check if a product ID is in the wishlist
@@ -91,7 +95,7 @@ export class WishlistService {
 
       const updated = [newItem, ...this._items()];
       this._items.set(updated);
-      this.saveToStorage(updated);
+      this.api.post('/wishlist', { productId: Number(product.id) }).subscribe({ error: () => this.refresh() });
 
       this.showToast({
         id: Date.now(),
@@ -112,7 +116,7 @@ export class WishlistService {
     if (this.isInWishlist(item.id)) return;
     const updated = [item, ...this._items()];
     this._items.set(updated);
-    this.saveToStorage(updated);
+    this.api.post('/wishlist', { productId: Number(item.id) }).subscribe({ error: () => this.refresh() });
   }
 
   /**
@@ -121,15 +125,14 @@ export class WishlistService {
   removeFromWishlist(productId: string): void {
     const updated = this._items().filter((item) => item.id !== productId);
     this._items.set(updated);
-    this.saveToStorage(updated);
+    this.api.delete(`/wishlist/${productId}`).subscribe({ error: () => this.refresh() });
   }
 
   /**
    * Clear all items from the wishlist
    */
   clearWishlist(): void {
-    this._items.set([]);
-    this.saveToStorage([]);
+    const ids = this._items().map(x => x.id); this._items.set([]); ids.forEach(id => this.api.delete(`/wishlist/${id}`).subscribe());
   }
 
   /**
@@ -152,30 +155,4 @@ export class WishlistService {
     this._toast.set(null);
   }
 
-  /**
-   * Storage helpers
-   */
-  private loadFromStorage(): WishlistItem[] {
-    if (typeof window === 'undefined' || !window.localStorage) {
-      return [];
-    }
-    try {
-      const data = localStorage.getItem(this.STORAGE_KEY);
-      return data ? JSON.parse(data) : [];
-    } catch (e) {
-      console.warn('Could not load wishlist from localStorage:', e);
-      return [];
-    }
-  }
-
-  private saveToStorage(items: WishlistItem[]): void {
-    if (typeof window === 'undefined' || !window.localStorage) {
-      return;
-    }
-    try {
-      localStorage.setItem(this.STORAGE_KEY, JSON.stringify(items));
-    } catch (e) {
-      console.warn('Could not save wishlist to localStorage:', e);
-    }
-  }
 }

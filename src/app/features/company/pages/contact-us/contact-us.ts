@@ -1,4 +1,5 @@
-import { Component } from '@angular/core';
+import { Component, inject } from '@angular/core';
+import { ApiClient } from '../../../../core/api/api-client.service';
 import { CommonModule } from '@angular/common';
 import { RouterLink } from '@angular/router';
 import { FormsModule } from '@angular/forms';
@@ -13,6 +14,7 @@ import { Footer } from '../../../storefront/components/footer/footer';
   styleUrl: './contact-us.scss',
 })
 export class ContactUsPage {
+  private readonly api = inject(ApiClient);
   name: string = '';
   email: string = '';
   subject: string = 'Order Tracking & Support';
@@ -56,13 +58,13 @@ export class ContactUsPage {
   onSubmit(event: Event): void {
     event.preventDefault();
     if (this.name && this.email && this.message) {
-      this.submitted = true;
-      setTimeout(() => {
+      this.api.post('/contact', { name: this.name, email: this.email, subject: this.subject, orderNumber: this.orderId || null, message: this.message }).subscribe({ next: () => {
+        this.submitted = true;
         this.name = '';
         this.email = '';
         this.orderId = '';
         this.message = '';
-      }, 5000);
+      }, error: () => this.submitted = false });
     }
   }
 }

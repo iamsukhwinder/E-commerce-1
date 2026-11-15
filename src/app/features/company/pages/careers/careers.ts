@@ -1,4 +1,5 @@
-import { Component } from '@angular/core';
+import { Component, inject, OnInit } from '@angular/core';
+import { ApiClient } from '../../../../core/api/api-client.service';
 import { CommonModule } from '@angular/common';
 import { RouterLink } from '@angular/router';
 import { FormsModule } from '@angular/forms';
@@ -22,7 +23,8 @@ export interface JobOpening {
   templateUrl: './careers.html',
   styleUrl: './careers.scss',
 })
-export class CareersPage {
+export class CareersPage implements OnInit {
+  private readonly api = inject(ApiClient);
   selectedDepartment: string = 'All';
   departments: string[] = ['All', 'Engineering', 'Supply Chain & Logistics', 'Merchandising & Catalog', 'Customer Experience'];
 
@@ -80,6 +82,8 @@ export class CareersPage {
   applicantNote: string = '';
   applicationSubmitted: boolean = false;
 
+  ngOnInit(): void { this.api.get<any[]>('/careers').subscribe(rows => { this.jobs = rows.map(x => ({ id: String(x.id), title: x.title, department: x.department, location: x.location, type: x.employmentType, experience: x.experience, desc: x.description })); this.departments = ['All', ...new Set(this.jobs.map(x => x.department))]; }); }
+
   get filteredJobs(): JobOpening[] {
     if (this.selectedDepartment === 'All') return this.jobs;
     return this.jobs.filter((j) => j.department === this.selectedDepartment);
@@ -93,14 +97,16 @@ export class CareersPage {
   submitApplication(event: Event): void {
     event.preventDefault();
     if (this.applicantName && this.applicantEmail) {
-      this.applicationSubmitted = true;
-      setTimeout(() => {
+      this.api.post(`/careers/${this.selectedJob!.id}/applications`, { name: this.applicantName, email: this.applicantEmail, phone: null, note: this.applicantNote, resumeUrl: null }).subscribe({ next: () => {
+        this.applicationSubmitted = true;
+        setTimeout(() => {
         this.selectedJob = null;
         this.applicantName = '';
         this.applicantEmail = '';
         this.applicantNote = '';
         this.applicationSubmitted = false;
-      }, 3000);
+        }, 3000);
+      }});
     }
   }
 }

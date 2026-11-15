@@ -1,4 +1,5 @@
 import { Injectable } from '@angular/core';
+import { ApiClient } from '../../../core/api/api-client.service';
 import { BehaviorSubject, Observable } from 'rxjs';
 import {
   AdminOrder,
@@ -45,7 +46,9 @@ export class AdminOrderService {
   private selectedOrderSubject = new BehaviorSubject<AdminOrder | null>(this.getSeedOrders()[0]);
   public selectedOrder$: Observable<AdminOrder | null> = this.selectedOrderSubject.asObservable();
 
-  constructor() {}
+  constructor(private readonly api?: ApiClient) { this.refreshFromApi(); }
+
+  refreshFromApi(): void { if (!this.api || typeof window === 'undefined' || !localStorage.getItem('yourstore_auth_token')) return; this.api.get<any[]>('/admin/orders').subscribe({ next: rows => { const orders = rows.map(x => this.fromApi(x)); this.ordersSubject.next(orders); this.selectedOrderSubject.next(orders[0] || null); }, error: () => {} }); }
 
   public get orders(): AdminOrder[] {
     return this.ordersSubject.value;
@@ -87,6 +90,7 @@ export class AdminOrderService {
     if (!order) {
       return { success: false, message: `Order ${orderId} not found.` };
     }
+    this.api?.put(`/admin/orders/${encodeURIComponent(order.id)}/status`, { status: targetStatus, notes: notes || null, trackingNumber: null, courier: null }).subscribe({ next: () => this.refreshFromApi() });
 
     if (!canTransitionOrder(order.orderStatus, targetStatus)) {
       return {
@@ -728,6 +732,8 @@ export class AdminOrderService {
       stockShortages: all.filter(o => o.items.some(i => i.quantity > i.inStock)).length
     };
   }
+
+  private fromApi(x: any): AdminOrder { const address = x.address; return { id:x.orderNumber, customerId:String(x.userId), customerName:x.customer.name, customerEmail:x.customer.email, customerPhone:x.customer.phone || '', shippingAddress:`${address.houseAddress}, ${address.locality}, ${address.city}, ${address.state} ${address.pincode}`, date:new Date(x.createdAt).toLocaleDateString(), time:new Date(x.createdAt).toLocaleTimeString(), orderStatus:x.status, paymentStatus:x.paymentStatus, procurementStatus:x.items.some((i:any)=>i.procurementStatus!=='None')?'Required':'None', shipmentStatus:x.status==='Delivered'?'Delivered':x.status==='Shipped'?'Shipped':'Unshipped', returnStatus:'None', refundStatus:'None', items:x.items.map((i:any)=>({id:String(i.id),name:i.productName,sku:i.sku,image:i.imageUrl||'',category:'Storefront',brand:'',price:i.unitPrice,quantity:i.quantity,inStock:i.quantity,warehouseLocation:'Main Warehouse',variant:i.variant,procurementStatus:i.procurementStatus==='None'?'None':'Requested'})), subtotal:x.subtotal,shippingCharge:x.shipping,discount:x.discount,totalAmount:x.total,paymentMethod:x.paymentMethod,stockReserved:true,timeline:x.events.map((e:any)=>({id:String(e.id),title:e.title,time:new Date(e.createdAt).toLocaleString(),actor:e.actor,completed:true,notes:e.notes})),shipments:[],notes:x.notes }; }
 
   private addTimelineEvent(order: AdminOrder, event: Omit<OrderTimelineEvent, 'id' | 'time'>): void {
     const newEv: OrderTimelineEvent = {

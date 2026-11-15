@@ -2,6 +2,8 @@ import { Injectable, signal, computed, inject } from '@angular/core';
 import { CartService, CartItem } from '../../../../core/services/cart.service';
 import { AuthService } from '../../../../core/auth/auth.service';
 import { AdminOrderService } from '../../../admin/services/admin-order.service';
+import { ApiClient } from '../../../../core/api/api-client.service';
+import { firstValueFrom } from 'rxjs';
 import { OrderItem } from '../../../admin/models/order.model';
 import {
   CheckoutStep,
@@ -19,9 +21,7 @@ export class CheckoutService {
   private readonly cartService = inject(CartService);
   private readonly authService = inject(AuthService);
   private readonly orderService = inject(AdminOrderService);
-
-  private readonly STORAGE_ADDRESSES_KEY = 'yourstore_saved_addresses';
-  private readonly STORAGE_RECEIPT_KEY = 'yourstore_last_placed_order';
+  private readonly api = inject(ApiClient);
 
   // Seed default addresses
   private readonly seedAddresses: DeliveryAddress[] = [
@@ -78,8 +78,8 @@ export class CheckoutService {
 
   // Reactive state signals
   readonly currentStep = signal<CheckoutStep>('address');
-  readonly savedAddresses = signal<DeliveryAddress[]>(this.loadAddressesFromStorage());
-  readonly selectedAddressId = signal<string>(this.initSelectedAddressId());
+  readonly savedAddresses = signal<DeliveryAddress[]>(this.seedAddresses);
+  readonly selectedAddressId = signal<string>(this.seedAddresses[0].id);
   readonly appliedCoupon = signal<Coupon | null>(null);
   readonly paymentDetails = signal<PaymentDetails>({
     method: 'upi',
@@ -91,7 +91,9 @@ export class CheckoutService {
   });
   readonly isProcessing = signal<boolean>(false);
   readonly processingStatus = signal<string>('Processing Your Payment...');
-  readonly placedReceipt = signal<PlacedOrderReceipt | null>(this.loadReceiptFromStorage());
+  readonly placedReceipt = signal<PlacedOrderReceipt | null>(null);
+
+  constructor() { this.loadAddresses(); }
 
   // Computed properties
   readonly selectedAddress = computed(() => {
@@ -182,8 +184,10 @@ export class CheckoutService {
     }
 
     this.savedAddresses.set(updatedList);
-    this.saveAddressesToStorage(updatedList);
     this.selectedAddressId.set(saved.id);
+    const payload = { ...data };
+    const request = existingId ? this.api.put<any>(`/addresses/${existingId}`, payload) : this.api.post<any>('/addresses', payload);
+    request.subscribe({ next: value => { saved.id = String(value.id); this.loadAddresses(); }, error: () => this.loadAddresses() });
     return saved;
   }
 
@@ -195,7 +199,7 @@ export class CheckoutService {
 
     const updatedList = currentList.filter(a => a.id !== id);
     this.savedAddresses.set(updatedList);
-    this.saveAddressesToStorage(updatedList);
+    this.api.delete(`/addresses/${id}`).subscribe({ error: () => this.loadAddresses() });
 
     if (this.selectedAddressId() === id) {
       this.selectedAddressId.set(updatedList[0].id);
@@ -224,6 +228,7 @@ export class CheckoutService {
     }
 
     this.appliedCoupon.set(coupon);
+    this.api.post<any>('/coupons/validate', { code: cleanCode, subtotal }).subscribe({ error: () => this.appliedCoupon.set(null) });
     return { success: true, message: `Awesome! Coupon "${coupon.code}" applied successfully.` };
   }
 
@@ -258,19 +263,21 @@ export class CheckoutService {
     this.isProcessing.set(true);
     this.currentStep.set('processing');
 
-    // Simulate realistic 3-stage secure banking gateway steps
     try {
+      if (typeof window === 'undefined' || !localStorage.getItem('yourstore_auth_token')) {
+        const receipt = this.finalizeOrder(address, items);
+        this.isProcessing.set(false); this.currentStep.set('success');
+        return { success: true, orderId: receipt.orderId };
+      }
       this.processingStatus.set('Connecting to secure banking gateway...');
-      await this.delay(700);
-
-      this.processingStatus.set('Authorizing payment and verifying credentials...');
-      await this.delay(900);
-
-      this.processingStatus.set('Reserving inventory and generating order confirmation...');
-      await this.delay(700);
-
-      // Create confirmed order record
-      const receipt = this.finalizeOrder(address, items);
+      const payment = this.paymentDetails();
+      const result: any = await firstValueFrom(this.api.post('/checkout', { addressId: Number(address.id), paymentMethod: payment.method, couponCode: this.appliedCoupon()?.code || null, paymentReference: null, notes: null }));
+      const breakdown = this.priceBreakdown();
+      const now = new Date();
+      const receipt: PlacedOrderReceipt = { orderId: result.orderNumber, paymentId: result.paymentReference || '', orderDate: now.toLocaleDateString(), orderTime: now.toLocaleTimeString(), estimatedDeliveryDate: new Date(result.estimatedDeliveryAt).toLocaleDateString(), totalAmount: result.total, subtotal: result.subtotal, shipping: result.shipping, savings: breakdown.savings, couponDiscount: result.discount, tax: result.tax, paymentMethod: payment.method, address, items: [...items], customerEmail: this.authService.currentUser()?.email || '', customerPhone: address.phone };
+      this.placedReceipt.set(receipt);
+      this.cartService.refresh();
+      this.removeCoupon();
 
       this.isProcessing.set(false);
       this.currentStep.set('success');
@@ -279,7 +286,7 @@ export class CheckoutService {
     } catch (err) {
       this.isProcessing.set(false);
       this.setStep('payment');
-      return { success: false, error: 'Payment gateway encountered a temporary error. Please try again.' };
+      return { success: false, error: (err as any)?.error?.message || 'Payment or order creation failed. Please try again.' };
     }
   }
 
@@ -376,8 +383,6 @@ export class CheckoutService {
     };
 
     this.placedReceipt.set(receipt);
-    this.saveReceiptToStorage(receipt);
-
     // Clear cart now that order is confirmed
     this.cartService.clearCart();
     this.removeCoupon();
@@ -395,47 +400,6 @@ export class CheckoutService {
     return new Promise(resolve => setTimeout(resolve, ms));
   }
 
-  // Storage Persistence Helpers
-  private loadAddressesFromStorage(): DeliveryAddress[] {
-    if (typeof window === 'undefined' || !window.localStorage) {
-      return this.seedAddresses;
-    }
-    try {
-      const data = localStorage.getItem(this.STORAGE_ADDRESSES_KEY);
-      return data ? JSON.parse(data) : this.seedAddresses;
-    } catch {
-      return this.seedAddresses;
-    }
-  }
-
-  private saveAddressesToStorage(list: DeliveryAddress[]): void {
-    if (typeof window === 'undefined' || !window.localStorage) return;
-    try {
-      localStorage.setItem(this.STORAGE_ADDRESSES_KEY, JSON.stringify(list));
-    } catch { /* storage restricted */ }
-  }
-
-  private initSelectedAddressId(): string {
-    const list = this.loadAddressesFromStorage();
-    const def = list.find(a => a.isDefault);
-    return def ? def.id : (list[0]?.id || 'addr-01');
-  }
-
-  private loadReceiptFromStorage(): PlacedOrderReceipt | null {
-    if (typeof window === 'undefined' || !window.localStorage) return null;
-    try {
-      const data = localStorage.getItem(this.STORAGE_RECEIPT_KEY);
-      return data ? JSON.parse(data) : null;
-    } catch {
-      return null;
-    }
-  }
-
-  private saveReceiptToStorage(receipt: PlacedOrderReceipt): void {
-    if (typeof window === 'undefined' || !window.localStorage) return;
-    try {
-      localStorage.setItem(this.STORAGE_RECEIPT_KEY, JSON.stringify(receipt));
-    } catch { /* storage restricted */ }
-  }
+  private loadAddresses(): void { this.api.get<any[]>('/addresses').subscribe({ next: rows => { const list = rows.map(x => ({ ...x, id: String(x.id) })) as DeliveryAddress[]; this.savedAddresses.set(list); this.selectedAddressId.set(String(list.find(x => x.isDefault)?.id || list[0]?.id || '')); }, error: () => this.savedAddresses.set([]) }); }
 }
 

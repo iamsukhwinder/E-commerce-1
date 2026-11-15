@@ -1,4 +1,5 @@
-import { Injectable, signal } from '@angular/core';
+import { Injectable, signal, inject } from '@angular/core';
+import { ApiClient } from '../api/api-client.service';
 
 export interface ExploreCategory {
   id: string;
@@ -18,6 +19,7 @@ const STORAGE_EXPLORE_KEY = 'herbalmart_explore_categories_v1';
   providedIn: 'root',
 })
 export class ExploreCategoryService {
+  private readonly api = inject(ApiClient);
   private readonly defaultCategories: ExploreCategory[] = [
     {
       id: 'home-living',
@@ -88,21 +90,8 @@ export class ExploreCategoryService {
   }
 
   private initCategories(): void {
-    if (typeof window !== 'undefined' && window.localStorage) {
-      try {
-        const stored = localStorage.getItem(STORAGE_EXPLORE_KEY);
-        if (stored) {
-          const parsed = JSON.parse(stored);
-          if (Array.isArray(parsed) && parsed.length > 0) {
-            this.categories.set(parsed);
-            return;
-          }
-        }
-      } catch (e) {
-        console.warn('Could not parse stored explore categories, falling back to defaults', e);
-      }
-    }
     this.categories.set(JSON.parse(JSON.stringify(this.defaultCategories)));
+    this.api.get<any[]>('/categories').subscribe({ next: rows => this.categories.set(rows.map((x, i) => ({ id:String(x.id),title:x.name,subtitle:'Explore authentic products',image:x.imageUrl||this.defaultCategories[i%this.defaultCategories.length].image,bgGradient:this.defaultCategories[i%this.defaultCategories.length].bgGradient,arrowBg:this.defaultCategories[i%this.defaultCategories.length].arrowBg,arrowColor:this.defaultCategories[i%this.defaultCategories.length].arrowColor,categoryQuery:x.slug }))), error:()=>{} });
   }
 
   private persist(): void {
@@ -136,7 +125,7 @@ export class ExploreCategoryService {
 
     const updated = [...list, newCat];
     this.categories.set(updated);
-    this.persist();
+    this.api.post<any>('/admin/categories', { id:0,name:newCat.title,slug:newCat.categoryQuery||newCat.id,imageUrl:newCat.image,parentId:null,isActive:true,displayOrder:updated.length }).subscribe({next:x=>{newCat.id=String(x.id);}});
     return newCat;
   }
 
@@ -151,7 +140,7 @@ export class ExploreCategoryService {
       ...patch,
     };
     this.categories.set(updated);
-    this.persist();
+    if (/^\d+$/.test(id)) this.api.put(`/admin/categories/${id}`, { id:Number(id),name:updated[idx].title,slug:updated[idx].categoryQuery||id,imageUrl:updated[idx].image,parentId:null,isActive:true,displayOrder:idx+1 }).subscribe();
     return true;
   }
 
@@ -164,7 +153,7 @@ export class ExploreCategoryService {
     if (list.length === this.categories().length) return false;
 
     this.categories.set(list);
-    this.persist();
+    if (/^\d+$/.test(id)) this.api.delete(`/admin/categories/${id}`).subscribe();
     return true;
   }
 

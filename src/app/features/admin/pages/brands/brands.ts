@@ -1,4 +1,5 @@
-import { Component } from '@angular/core';
+import { Component, inject, OnInit } from '@angular/core';
+import { AdminApiService } from '../../services/admin-api.service';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 
@@ -23,7 +24,8 @@ export interface BrandItem {
   templateUrl: './brands.html',
   styleUrl: './brands.scss'
 })
-export class AdminBrands {
+export class AdminBrands implements OnInit {
+  private readonly adminApi = inject(AdminApiService);
   // Search & Filter
   searchTerm: string = '';
   statusFilter: string = 'All Status';
@@ -204,6 +206,8 @@ export class AdminBrands {
     }
   ];
 
+  ngOnInit(): void { this.adminApi.brands().subscribe(rows => this.brands = rows.map((x, i) => ({ id: x.id, name: x.name, slug: x.slug, logo: x.logoUrl || x.name[0], logoBg: '#e8f5e9', website: '', status: x.isActive ? 'Active' : 'Inactive', productsCount: 0, sortOrder: i + 1, featured: false }))); }
+
   get filteredBrands(): BrandItem[] {
     return this.brands.filter(item => {
       const matchesSearch = !this.searchTerm.trim() ||
@@ -266,6 +270,7 @@ export class AdminBrands {
   deleteBrand(brand: BrandItem): void {
     if (confirm(`Are you sure you want to delete brand "${brand.name}"?`)) {
       this.brands = this.brands.filter(b => b.id !== brand.id);
+      this.adminApi.deleteBrand(brand.id).subscribe({ error: () => this.ngOnInit() });
     }
   }
 
@@ -310,7 +315,7 @@ export class AdminBrands {
       featured: this.newBrand.featured
     };
 
-    this.brands.push(newEntry);
+    this.adminApi.createBrand({ id: 0, name: newEntry.name, slug: newEntry.slug, logoUrl: this.newBrand.logoPreview || null, description: this.newBrand.description, isActive: newEntry.status === 'Active' }).subscribe({ next: () => this.ngOnInit() });
     alert(`Brand "${newEntry.name}" has been successfully added!`);
 
     // Reset Form

@@ -57,3 +57,6 @@ Angular CLI does not come with an end-to-end testing framework by default. You c
 ## Additional Resources
 
 For more information on using the Angular CLI, including detailed command references, visit the [Angular CLI Overview and Command Reference](https://angular.dev/tools/cli) page.
+# Backend API
+
+The .NET/SQL backend is available in [`api`](./api/README.md). Run `./api/setup-api.ps1` to create and seed the local database. The Angular frontend is integrated with the API at `http://localhost:5080/api` through `src/environments/environment.ts`.

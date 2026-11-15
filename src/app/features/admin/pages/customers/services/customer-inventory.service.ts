@@ -1,4 +1,5 @@
-import { Injectable } from '@angular/core';
+import { Injectable, inject } from '@angular/core';
+import { ApiClient } from '../../../../../core/api/api-client.service';
 import { BehaviorSubject, Observable } from 'rxjs';
 import {
   AdminCustomerRecord,
@@ -14,6 +15,7 @@ import {
   providedIn: 'root'
 })
 export class CustomerInventoryService {
+  private readonly api = inject(ApiClient);
   readonly couriers: string[] = [
     'BlueDart Express',
     'Delhivery Logistics',
@@ -512,6 +514,8 @@ export class CustomerInventoryService {
 
   private customersSubject = new BehaviorSubject<AdminCustomerRecord[]>(this.initialCustomers);
   customers$: Observable<AdminCustomerRecord[]> = this.customersSubject.asObservable();
+
+  constructor() { if (typeof window !== 'undefined' && localStorage.getItem('yourstore_auth_token')) this.api.get<any[]>('/admin/customers').subscribe({ next: rows => this.customersSubject.next(rows.map(x => ({ id:String(x.id), name:x.name, email:x.email, phone:x.phone||'', location:'', avatarInitials:x.name.split(' ').map((n:string)=>n[0]).join('').slice(0,2), avatarBg:'#dbeafe', customerType:'Retail', status:x.isActive?'Active':'Inactive', joinDate:new Date(x.createdAt).toLocaleDateString(), joinTime:new Date(x.createdAt).toLocaleTimeString(), totalOrders:x.orderCount, totalSpent:x.lifetimeValue, recentOrders:[], procurementRequisitions:[] }))) }); }
 
   getCustomers(): AdminCustomerRecord[] {
     return this.customersSubject.getValue();

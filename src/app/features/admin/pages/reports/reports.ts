@@ -1,3 +1,9 @@
-import { Component } from '@angular/core';
+import { Component, inject, OnInit } from '@angular/core';
+import { AdminApiService } from '../../services/admin-api.service';
 @Component({selector:'app-admin-reports',standalone:true,templateUrl:'./reports.html',styleUrl:'./reports.scss'})
-export class AdminReports { readonly stats=[{label:'Gross sales',value:'$48,294.80',change:'+12.8%'},{label:'Orders processed',value:'1,284',change:'+8.2%'},{label:'Average order value',value:'$37.61',change:'+3.1%'},{label:'Refund rate',value:'1.8%',change:'Within target'}]; readonly months=[{month:'May',width:45},{month:'Jun',width:58},{month:'Jul',width:52},{month:'Aug',width:70},{month:'Sep',width:64},{month:'Oct',width:88}]; }
+export class AdminReports implements OnInit {
+  private readonly api=inject(AdminApiService);
+  stats=[{label:'Gross sales',value:'$0.00',change:'Live API'},{label:'Orders processed',value:'0',change:'Live API'},{label:'Average order value',value:'$0.00',change:'Live API'},{label:'Cancelled orders',value:'0',change:'Live API'}];
+  months:{month:string;width:number}[]=[];
+  ngOnInit():void{this.api.reports().subscribe(x=>{this.stats=[{label:'Gross sales',value:`$${Number(x.grossSales).toFixed(2)}`,change:'Selected period'},{label:'Orders processed',value:String(x.ordersProcessed),change:'Selected period'},{label:'Average order value',value:`$${Number(x.averageOrderValue).toFixed(2)}`,change:'Selected period'},{label:'Cancelled orders',value:String(x.cancelledOrders),change:'Selected period'}];const max=Math.max(1,...x.salesByMonth.map((m:any)=>m.total));this.months=x.salesByMonth.map((m:any)=>({month:`${m.month}/${m.year}`,width:Math.round(m.total/max*100)}));});}
+}

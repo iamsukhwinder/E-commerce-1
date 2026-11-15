@@ -2,6 +2,7 @@ import { Injectable, inject } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { BehaviorSubject, Observable, of, throwError } from 'rxjs';
 import { map, catchError, tap } from 'rxjs/operators';
+import { environment } from '../../../environments/environment';
 
 export interface ProductVariant {
   label: string;
@@ -133,7 +134,7 @@ export interface DummyJsonResponse {
 })
 export class ProductService {
   private readonly http = inject(HttpClient);
-  public readonly apiUrl = 'https://dummyjson.com/products';
+  public readonly apiUrl = `${environment.apiUrl}/products`;
 
   // Reactive state for API products
   private apiProductsSubject = new BehaviorSubject<ProductDetailModel[]>([]);
@@ -2284,15 +2285,13 @@ export class ProductService {
     this.isLoadingSubject.next(true);
     this.errorSubject.next(null);
 
-    const url = limit > 0 ? `${this.apiUrl}?limit=${limit}` : this.apiUrl;
-    return this.http.get<DummyJsonResponse>(url).pipe(
+    const url = `${this.apiUrl}?page=1&pageSize=${limit > 0 ? limit : 100}`;
+    return this.http.get<any>(url).pipe(
       map((response) => {
-        const mappedProducts = (response.products || []).map((p) =>
-          this.mapDummyJsonToProduct(p)
-        );
+        const mappedProducts = (response.items || []).map((p: any) => this.mapApiProduct(p));
 
         // Store into internal catalog dictionary for fast direct ID lookup
-        mappedProducts.forEach((p) => {
+        mappedProducts.forEach((p: ProductDetailModel) => {
           this.catalog[p.id] = p;
           const slug = p.name.toLowerCase().replace(/[^a-z0-9]+/g, '-');
           this.catalog[slug] = p;
@@ -2304,8 +2303,8 @@ export class ProductService {
         return mappedProducts;
       }),
       catchError((err) => {
-        console.error('Failed to fetch from DummyJSON Products API', err);
-        const errorMsg = 'Failed to load live products from DummyJSON API. Please check your network connection and try again.';
+        console.error('Failed to fetch products from the ecommerce API', err);
+        const errorMsg = 'Failed to load products. Please make sure the .NET API is running.';
         this.errorSubject.next(errorMsg);
         this.isLoadingSubject.next(false);
         return of([]);
@@ -2324,11 +2323,10 @@ export class ProductService {
       return of(existing);
     }
 
-    // If ID is numeric, fetch directly from DummyJSON
-    if (/^\d+$/.test(id)) {
-      return this.http.get<DummyJsonProduct>(`${this.apiUrl}/${id}`).pipe(
+    if (id) {
+      return this.http.get<any>(`${this.apiUrl}/${encodeURIComponent(id)}`).pipe(
         map((p) => {
-          const mapped = this.mapDummyJsonToProduct(p);
+          const mapped = this.mapApiProduct(p);
           this.catalog[mapped.id] = mapped;
           return mapped;
         }),
@@ -2337,6 +2335,30 @@ export class ProductService {
     }
 
     return of(existing);
+  }
+
+  private mapApiProduct(item: any): ProductDetailModel {
+    let gallery: string[] = [];
+    let details: any = {};
+    try { gallery = typeof item.galleryJson === 'string' ? JSON.parse(item.galleryJson) : (item.galleryJson || []); } catch { gallery = []; }
+    try { details = typeof item.detailsJson === 'string' ? JSON.parse(item.detailsJson) : (item.detailsJson || {}); } catch { details = {}; }
+    const image = item.imageUrl || gallery[0] || '/images/wellness/neem-turmeric.jpg';
+    const categoryName = item.category?.name || 'Wellness';
+    const categorySlug = item.category?.slug || 'wellness';
+    return {
+      id: String(item.id), name: item.name, brand: item.brand?.name || 'YourStore Authentic', category: categorySlug,
+      categoryTag: categoryName.toUpperCase(), categoryTitle: item.name, categorySubtitle: item.shortDescription || categoryName,
+      subtitle: item.shortDescription || item.description || '', aboutText: item.description || item.shortDescription || '',
+      rating: Number(item.rating || 0), reviewCount: Number(item.reviewCount || item.reviews?.length || 0), price: Number(item.price || 0),
+      originalPrice: item.originalPrice == null ? undefined : Number(item.originalPrice), image, galleryImages: gallery.length ? gallery : [image],
+      variants: [{ label: 'Standard', subLabel: '1 Unit', price: Number(item.price || 0) }], badges: this.defaultBadges,
+      aboutBadges: [{ title: 'Verified Authentic', icon: 'fa-circle-check' }, { title: 'Quality Checked', icon: 'fa-shield-halved' }],
+      powerBanner: { title: item.name, subtitle: item.shortDescription || 'Authentic and quality checked.', checkItems: details.benefits || ['Authenticity verified', 'Global delivery'], image },
+      benefits: (details.benefits || ['Authenticity verified', 'Quality checked']).map((title: string) => ({ title, desc: title, icon: 'fa-leaf' })),
+      ingredients: [], usageSteps: details.usage ? [{ step: '1', title: 'Directions', desc: details.usage }] : [],
+      reviews: (item.reviews || []).map((r: any) => ({ id: String(r.id), author: r.userName || 'Customer', rating: r.rating, date: r.createdAt, title: r.title || '', comment: r.comment || '', verified: true })),
+      isBestSeller: !!item.isFeatured, categoryGroup: categorySlug, stock: Number(item.stockQuantity || 0), availabilityStatus: item.stockQuantity > 0 ? 'In Stock' : 'Out of Stock', sku: item.sku, tags: []
+    };
   }
 
   /**

@@ -1,4 +1,5 @@
 import { Injectable, signal, computed } from '@angular/core';
+import { ApiClient } from '../api/api-client.service';
 
 export type SectionType = 'Hero' | 'Showcase' | 'Grid' | 'Carousel' | 'Banner' | 'Features' | 'Custom';
 export type LayoutMode = 'grid' | 'carousel' | 'split-banner' | 'cards-row';
@@ -297,29 +298,15 @@ export class HomepageBuilderService {
   // Unsaved changes flag
   readonly hasUnsavedChanges = signal<boolean>(false);
 
-  constructor() {
+  constructor(private readonly api?: ApiClient) {
     this.initSections();
   }
 
   private initSections(): void {
-    if (typeof window !== 'undefined' && window.localStorage) {
-      try {
-        const stored = localStorage.getItem(STORAGE_PUBLISHED_KEY) || localStorage.getItem(STORAGE_DRAFT_KEY);
-        if (stored) {
-          const parsed = JSON.parse(stored);
-          if (Array.isArray(parsed) && parsed.length > 0) {
-            this.publishedSections.set(parsed);
-            this.workingSections.set(JSON.parse(JSON.stringify(parsed)));
-            return;
-          }
-        }
-      } catch (e) {
-        console.warn('Could not parse stored published sections, falling back to defaults', e);
-      }
-    }
     const def = JSON.parse(JSON.stringify(this.defaultSections));
     this.publishedSections.set(def);
     this.workingSections.set(JSON.parse(JSON.stringify(def)));
+    this.api?.get<any>('/home').subscribe({ next: data => { const rows = (data.sections || []).map((x: any) => this.fromApi(x)); if (rows.length) { this.publishedSections.set(rows); this.workingSections.set(JSON.parse(JSON.stringify(rows))); } }, error: () => {} });
   }
 
   private persistPublished(): void {
@@ -353,6 +340,7 @@ export class HomepageBuilderService {
     this.hasUnsavedChanges.set(false);
     this.persistPublished();
     this.persistDraft();
+    if (this.canWrite()) updated.forEach(sec => { if (/^\d+$/.test(sec.id)) this.api!.put(`/admin/home-sections/${sec.id}`, this.toApi(sec)).subscribe(); });
   }
 
   // LOOKUP
@@ -457,6 +445,7 @@ export class HomepageBuilderService {
 
     const nextList = [...list, newSec];
     this.commitAndSync(nextList);
+    if (this.canWrite()) this.api!.post<any>('/admin/home-sections', this.toApi(newSec)).subscribe({ next: x => { newSec.id = String(x.id); } });
     return newSec;
   }
 
@@ -473,6 +462,7 @@ export class HomepageBuilderService {
 
     const list = [...this.workingSections(), clone];
     this.commitAndSync(list);
+    if (this.canWrite() && /^\d+$/.test(id)) this.api!.delete(`/admin/home-sections/${id}`).subscribe();
     return clone;
   }
 
@@ -509,6 +499,7 @@ export class HomepageBuilderService {
   // PUBLISH TO LIVE STOREFRONT
   publishToLive(): void {
     this.commitAndSync(this.workingSections());
+    if (this.canWrite()) this.api!.post('/admin/home-sections/publish', {}).subscribe();
   }
 
   // RESTORE TO LAST PUBLISHED STATE
@@ -524,4 +515,8 @@ export class HomepageBuilderService {
     const def = JSON.parse(JSON.stringify(this.defaultSections));
     this.commitAndSync(def);
   }
+
+  private fromApi(x: any): HomepageSection { let config: any = {}; try { config = JSON.parse(x.configurationJson || '{}'); } catch {} return { id: String(x.id), componentId: x.sectionKey, name: x.title, tag: config.tag || x.type, title: x.title, subtitle: config.subtitle || '', description: config.description || '', enabled: x.isEnabled, order: x.displayOrder, type: (x.type || 'Custom') as SectionType, itemsCount: config.itemsCount || 4, previewImage: config.previewImage || '/images/wellness/wellness-banner.jpg', lastUpdated: 'From API', styling: config.styling || { background:'#fff',textColor:'#17251c',padding:'py-5',borderRadius:'16px',columns:4 }, productConfig: config.productConfig || { source:'all',productLimit:4,displayLayout:'grid',cardStyle:'standard' } }; }
+  private toApi(x: HomepageSection): any { return { id: Number(x.id) || 0, sectionKey: x.componentId || x.id, type: x.type, title: x.title, configurationJson: JSON.stringify({ tag:x.tag,subtitle:x.subtitle,description:x.description,itemsCount:x.itemsCount,previewImage:x.previewImage,styling:x.styling,productConfig:x.productConfig }), displayOrder:x.order, isEnabled:x.enabled, isPublished:true }; }
+  private canWrite(): boolean { return !!this.api && typeof window !== 'undefined' && !!localStorage.getItem('yourstore_auth_token'); }
 }

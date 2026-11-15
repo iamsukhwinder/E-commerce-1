@@ -91,8 +91,8 @@ export class LoginComponent implements OnInit {
    * One-click demo sign-in for testing
    */
   async onDemoLogin(): Promise<void> {
-    this.email = 'customer@yourstore.com';
-    this.password = 'password123';
+    this.email = 'priya@example.com';
+    this.password = 'Customer123!';
     this.isLoading = true;
     this.errorMessage = '';
 
@@ -112,6 +112,7 @@ export class LoginComponent implements OnInit {
    * 2. Redirect the user back to the product or return page.
    */
   private completeLoginFlow(): void {
+    this.cartService.refresh();
     const pending = this.authService.consumePendingCartAction();
 
     if (pending) {

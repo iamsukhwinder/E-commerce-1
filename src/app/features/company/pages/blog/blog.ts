@@ -1,4 +1,5 @@
-import { Component } from '@angular/core';
+import { Component, inject, OnInit } from '@angular/core';
+import { ApiClient } from '../../../../core/api/api-client.service';
 import { CommonModule } from '@angular/common';
 import { RouterLink } from '@angular/router';
 import { StorefrontHeader } from '../../../storefront/components/storefront-header/storefront-header';
@@ -26,7 +27,8 @@ export interface BlogPost {
   templateUrl: './blog.html',
   styleUrl: './blog.scss',
 })
-export class BlogPage {
+export class BlogPage implements OnInit {
+  private readonly api = inject(ApiClient);
   selectedCategory: string = 'All';
   categories: string[] = ['All', 'Homeopathy & Remedies', 'Ayurveda & Wellness', 'Culinary Traditions', 'Festive Living'];
 
@@ -123,6 +125,8 @@ export class BlogPage {
       },
     },
   ];
+
+  ngOnInit(): void { this.api.get<any[]>('/blog').subscribe(rows => { const mapped = rows.map(x => ({ id: x.slug, title: x.title, category: x.category, date: new Date(x.publishedAt).toLocaleDateString(), readTime: `${x.readTimeMinutes} min read`, image: x.imageUrl, excerpt: x.excerpt, author: { name: x.authorName, avatar: '/images/wellness/neem-turmeric.jpg', role: x.authorRole || '' } })); const featured = rows.findIndex(x => x.isFeatured); if (mapped.length) { this.featuredPost = mapped[featured >= 0 ? featured : 0]; this.posts = mapped.filter((_, i) => i !== (featured >= 0 ? featured : 0)); this.categories = ['All', ...new Set(mapped.map(x => x.category))]; } }); }
 
   get filteredPosts(): BlogPost[] {
     if (this.selectedCategory === 'All') return this.posts;

@@ -1,4 +1,5 @@
-import { Component } from '@angular/core';
+import { Component, inject, OnInit } from '@angular/core';
+import { AdminApiService } from '../../services/admin-api.service';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 
@@ -21,7 +22,8 @@ export interface CategoryItem {
   templateUrl: './categories.html',
   styleUrl: './categories.scss'
 })
-export class AdminCategories {
+export class AdminCategories implements OnInit {
+  private readonly adminApi = inject(AdminApiService);
   // Search & Filter
   searchTerm: string = '';
   statusFilter: string = 'All Status';
@@ -185,6 +187,8 @@ export class AdminCategories {
     }
   ];
 
+  ngOnInit(): void { this.adminApi.categories().subscribe(rows => this.categories = rows.map(x => ({ id: x.id, name: x.name, slug: x.slug, icon: '🌿', iconBg: '#e8f5e9', status: x.isActive ? 'Active' : 'Inactive', productsCount: 0, sortOrder: x.displayOrder }))); }
+
   get filteredCategories(): CategoryItem[] {
     return this.categories.filter(item => {
       const matchesSearch = !this.searchTerm.trim() ||
@@ -245,6 +249,7 @@ export class AdminCategories {
   deleteCategory(category: CategoryItem): void {
     if (confirm(`Are you sure you want to delete category "${category.name}"?`)) {
       this.categories = this.categories.filter(c => c.id !== category.id);
+      this.adminApi.deleteCategory(category.id).subscribe({ error: () => this.ngOnInit() });
     }
   }
 
@@ -285,7 +290,7 @@ export class AdminCategories {
       sortOrder: this.newCategory.sortOrder || this.categories.length + 1
     };
 
-    this.categories.push(newEntry);
+    this.adminApi.createCategory({ id: 0, name: newEntry.name, slug: newEntry.slug, imageUrl: this.newCategory.imagePreview || null, parentId: null, isActive: newEntry.status === 'Active', displayOrder: newEntry.sortOrder }).subscribe({ next: () => this.ngOnInit() });
     alert(`Category "${newEntry.name}" has been successfully added!`);
 
     // Reset Form

@@ -1,4 +1,5 @@
-import { Injectable, signal, computed } from '@angular/core';
+import { Injectable, signal, computed, inject } from '@angular/core';
+import { ApiClient } from '../api/api-client.service';
 
 export interface CartItem {
   id: string; // Composite key: `${productId}_${variant}`
@@ -26,10 +27,10 @@ export interface CartToast {
   providedIn: 'root',
 })
 export class CartService {
-  private readonly STORAGE_KEY = 'yourstore_shopping_cart';
+  private readonly api = inject(ApiClient);
 
   // State signals
-  private readonly _items = signal<CartItem[]>(this.loadFromStorage());
+  private readonly _items = signal<CartItem[]>([]);
   private readonly _toast = signal<CartToast | null>(null);
   private toastTimeoutId: any = null;
 
@@ -53,6 +54,13 @@ export class CartService {
   readonly total = computed(() => +(this.subtotal() + this.shipping() + this.estimatedTax()).toFixed(2));
 
   readonly isEmpty = computed(() => this._items().length === 0);
+
+  constructor() { this.refresh(); }
+
+  refresh(): void {
+    if (typeof window === 'undefined' || !localStorage.getItem('yourstore_auth_token')) { this._items.set([]); return; }
+    this.api.get<any[]>('/cart').subscribe({ next: rows => this._items.set(rows.map(row => this.fromApi(row))), error: () => this._items.set([]) });
+  }
 
   /**
    * Add a product to cart.
@@ -92,7 +100,9 @@ export class CartService {
     }
 
     this._items.set(updatedItems);
-    this.saveToStorage(updatedItems);
+    const target = updatedItems.find(i => i.id === compositeId)!;
+    this.api.put<any[]>('/cart/items', { productId: Number(item.productId), quantity: target.quantity, variant: variantKey })
+      .subscribe({ next: rows => this._items.set(rows.map(row => this.fromApi(row))), error: () => this.refresh() });
 
     // Trigger toast notification
     this.showToast({
@@ -119,7 +129,9 @@ export class CartService {
     );
 
     this._items.set(updated);
-    this.saveToStorage(updated);
+    const item = updated.find(i => i.id === itemId);
+    if (item) this.api.put<any[]>('/cart/items', { productId: Number(item.productId), quantity: item.quantity, variant: item.variant })
+      .subscribe({ next: rows => this._items.set(rows.map(row => this.fromApi(row))), error: () => this.refresh() });
   }
 
   /**
@@ -147,8 +159,9 @@ export class CartService {
    */
   removeItem(itemId: string): void {
     const updated = this._items().filter((i) => i.id !== itemId);
+    const removed = this._items().find(i => i.id === itemId);
     this._items.set(updated);
-    this.saveToStorage(updated);
+    if (removed) this.api.delete(`/cart/items/${removed.id}`).subscribe({ error: () => this.refresh() });
   }
 
   /**
@@ -156,7 +169,7 @@ export class CartService {
    */
   clearCart(): void {
     this._items.set([]);
-    this.saveToStorage([]);
+    this.api.delete('/cart').subscribe({ error: () => this.refresh() });
   }
 
   /**
@@ -182,30 +195,5 @@ export class CartService {
     this._toast.set(null);
   }
 
-  /**
-   * Local storage helpers
-   */
-  private loadFromStorage(): CartItem[] {
-    if (typeof window === 'undefined' || !window.localStorage) {
-      return [];
-    }
-    try {
-      const data = localStorage.getItem(this.STORAGE_KEY);
-      return data ? JSON.parse(data) : [];
-    } catch (e) {
-      console.warn('Could not parse cart from localStorage:', e);
-      return [];
-    }
-  }
-
-  private saveToStorage(items: CartItem[]): void {
-    if (typeof window === 'undefined' || !window.localStorage) {
-      return;
-    }
-    try {
-      localStorage.setItem(this.STORAGE_KEY, JSON.stringify(items));
-    } catch (e) {
-      console.warn('Could not save cart to localStorage:', e);
-    }
-  }
+  private fromApi(row: any): CartItem { return { id: String(row.id), productId: String(row.productId), name: row.product.name, brand: row.product.brand, image: row.product.imageUrl || '', price: row.product.price, originalPrice: row.product.originalPrice, variant: row.variant || 'Standard', quantity: row.quantity }; }
 }

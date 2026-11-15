@@ -1,4 +1,5 @@
-import { Component } from '@angular/core';
+import { Component, inject, OnInit } from '@angular/core';
+import { AdminApiService } from '../../services/admin-api.service';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
@@ -32,7 +33,8 @@ export interface LowStockAlertItem {
   templateUrl: './inventory.html',
   styleUrl: './inventory.scss'
 })
-export class AdminInventory {
+export class AdminInventory implements OnInit {
+  private readonly adminApi = inject(AdminApiService);
   // Search & Filter Controls
   searchTerm: string = '';
   selectedCategory: string = 'All Categories';
@@ -203,6 +205,8 @@ export class AdminInventory {
     }
   ];
 
+  ngOnInit(): void { this.adminApi.inventory().subscribe(rows => { this.inventoryItems = rows.map(x => ({ id: String(x.id), name: x.name, variants: 'Standard', image: '', sku: x.sku, category: x.category, brand: x.brand, price: 0, stock: x.stockQuantity, status: x.status })); this.categories = ['All Categories', ...new Set(this.inventoryItems.map(x => x.category))]; this.brands = ['All Brands', ...new Set(this.inventoryItems.map(x => x.brand))]; }); }
+
   // Right sidebar: Low stock alerts list
   lowStockAlerts: LowStockAlertItem[] = [
     {
@@ -319,6 +323,7 @@ export class AdminInventory {
   saveStockEdit(): void {
     if (this.selectedItemForEdit) {
       this.selectedItemForEdit.stock = this.newStockValue;
+      this.adminApi.updateInventory(Number(this.selectedItemForEdit.id), this.newStockValue, 5).subscribe({ error: () => this.ngOnInit() });
       if (this.newStockValue === 0) {
         this.selectedItemForEdit.status = 'Out of Stock';
       } else if (this.newStockValue <= 15) {

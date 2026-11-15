@@ -1,4 +1,5 @@
-import { Component } from '@angular/core';
+import { Component, inject, OnInit } from '@angular/core';
+import { AdminApiService } from '../../services/admin-api.service';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
@@ -24,7 +25,8 @@ export interface ProductItem {
   templateUrl: './products.html',
   styleUrl: './products.scss'
 })
-export class AdminProducts {
+export class AdminProducts implements OnInit {
+  private readonly adminApi = inject(AdminApiService);
   // Filters & Search
   searchTerm: string = '';
   selectedCategory: string = 'All Categories';
@@ -168,6 +170,8 @@ export class AdminProducts {
     }
   ];
 
+  ngOnInit(): void { this.adminApi.products().subscribe(rows => this.products = rows.map(x => ({ id: x.id, image: x.imageUrl || '', name: x.name, sku: x.sku, category: x.category.name, brand: x.brand.name, price: x.price, stock: x.stockQuantity, status: x.isActive ? (x.stockQuantity > 0 ? 'Active' : 'Out of Stock') : 'Draft', featured: x.isFeatured }))); }
+
   get filteredProducts(): ProductItem[] {
     return this.products.filter(p => {
       const matchSearch =
@@ -199,6 +203,7 @@ export class AdminProducts {
 
   deleteProduct(p: ProductItem): void {
     this.products = this.products.filter(item => item.id !== p.id);
+    this.adminApi.deleteProduct(p.id).subscribe({ error: () => this.ngOnInit() });
   }
 
   getCategoryBadgeClass(category: string): string {

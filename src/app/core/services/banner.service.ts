@@ -1,4 +1,5 @@
 import { Injectable, signal, computed } from '@angular/core';
+import { ApiClient } from '../api/api-client.service';
 
 export interface BannerSectionMeta {
   key: string;
@@ -401,36 +402,17 @@ export class BannerService {
   readonly activeBanners = computed(() => this.banners().filter((b) => b.status === 'Active').length);
   readonly inactiveBanners = computed(() => this.banners().filter((b) => b.status === 'Inactive').length);
 
-  constructor() {
+  constructor(private readonly api?: ApiClient) {
     this.initBanners();
   }
 
   private initBanners(): void {
-    if (typeof window !== 'undefined' && window.localStorage) {
-      try {
-        const stored = localStorage.getItem(STORAGE_KEY);
-        if (stored) {
-          const parsed = JSON.parse(stored);
-          if (Array.isArray(parsed) && parsed.length > 0) {
-            this.banners.set(parsed);
-            return;
-          }
-        }
-      } catch (e) {
-        console.warn('Could not parse stored banners, falling back to default registry', e);
-      }
-    }
     this.banners.set([...this.defaultBanners]);
+    this.api?.get<any>('/home').subscribe({ next: data => this.banners.set((data.banners || []).map((x: any) => ({ id: x.id, title: x.title, subtitle: x.subtitle || '', image: x.imageUrl, section: x.section, targetPage: 'Home', status: x.isActive ? 'Active' : 'Inactive', sortOrder: x.displayOrder, link: x.linkUrl || '' }))), error: () => {} });
   }
 
   private persistBanners(): void {
-    if (typeof window !== 'undefined' && window.localStorage) {
-      try {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(this.banners()));
-      } catch (e) {
-        console.warn('Could not persist banners to localStorage', e);
-      }
-    }
+    // Mutations are persisted directly by the API methods below.
   }
 
   // Get banners for a specific section
@@ -479,7 +461,7 @@ export class BannerService {
       id: nextId,
     };
     this.banners.set([...list, newBanner]);
-    this.persistBanners();
+    if (this.canWrite()) this.api?.post<any>('/admin/banners', this.toApi(newBanner)).subscribe({ next: x => { newBanner.id = x.id; this.initBanners(); } });
     return newBanner;
   }
 
@@ -492,7 +474,7 @@ export class BannerService {
     const updated = [...list];
     updated[index] = { ...updated[index], ...patch, id };
     this.banners.set(updated);
-    this.persistBanners();
+    if (this.canWrite()) this.api?.put(`/admin/banners/${id}`, this.toApi(updated[index])).subscribe({ error: () => this.initBanners() });
     return true;
   }
 
@@ -518,7 +500,7 @@ export class BannerService {
     const nextList = list.filter((b) => b.id !== id);
     if (nextList.length === list.length) return false;
     this.banners.set(nextList);
-    this.persistBanners();
+    if (this.canWrite()) this.api?.delete(`/admin/banners/${id}`).subscribe({ error: () => this.initBanners() });
     return true;
   }
 
@@ -527,7 +509,7 @@ export class BannerService {
     const idSet = new Set(ids);
     const nextList = this.banners().filter((b) => !idSet.has(b.id));
     this.banners.set(nextList);
-    this.persistBanners();
+    if (this.canWrite()) ids.forEach(id => this.api?.delete(`/admin/banners/${id}`).subscribe());
   }
 
   // Reset all banners to factory defaults
@@ -535,4 +517,7 @@ export class BannerService {
     this.banners.set([...this.defaultBanners]);
     this.persistBanners();
   }
+
+  private toApi(x: BannerItem): any { return { id: x.id, section: x.section, title: x.title, subtitle: x.subtitle || null, imageUrl: x.image, linkUrl: x.link || null, displayOrder: x.sortOrder, isActive: x.status === 'Active' }; }
+  private canWrite(): boolean { return !!this.api && typeof window !== 'undefined' && !!localStorage.getItem('yourstore_auth_token'); }
 }
